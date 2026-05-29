@@ -1,0 +1,95 @@
+{{define "title"}}PAT Tokens &amp; Webhook Setup{{end}}
+
+{{define "content"}}
+<div class="page-header">
+    <div>
+        <h1>PAT Tokens &amp; Webhook Setup</h1>
+        <p>Create the GitHub personal access tokens for your source and target repositories, then add the webhook that lets the mirror react to push events.</p>
+    </div>
+    <a href="/mirrors/new" class="btn btn-primary">Create Mirror</a>
+</div>
+{{if .Flash}}<div class="flash flash-success mb-1">{{.Flash}}</div>{{end}}
+
+<div class="stack">
+    <section class="card">
+        <h3>Create the Source Token</h3>
+        <p class="text-muted mb-1">Use the source token to let GitHub Mirror read the repository you want to mirror from.</p>
+        <ol style="margin-left: 1.5rem;">
+            <li>Open GitHub and click your profile photo.</li>
+            <li>Go to <strong>Settings</strong>.</li>
+            <li>Open <strong>Developer settings</strong>.</li>
+            <li>Open <strong>Personal access tokens</strong>.</li>
+            <li>Create a new token.</li>
+            <li>Grant read access to the source repository contents.</li>
+            <li>Copy the token and store it somewhere safe.</li>
+        </ol>
+        <p class="text-muted mt-1">Use this token in the <code>Source Token (PAT)</code> field.</p>
+    </section>
+
+    <section class="card">
+        <h3>Create the Target Token</h3>
+        <p class="text-muted mb-1">Use the target token to let GitHub Mirror push updates to the destination repository.</p>
+        <ol style="margin-left: 1.5rem;">
+            <li>Open GitHub and click your profile photo.</li>
+            <li>Go to <strong>Settings</strong>.</li>
+            <li>Open <strong>Developer settings</strong>.</li>
+            <li>Open <strong>Personal access tokens</strong>.</li>
+            <li>Create a new token.</li>
+            <li>Grant write access to the target repository contents.</li>
+            <li>Copy the token and store it somewhere safe.</li>
+        </ol>
+        <p class="text-muted mt-1">Use this token in the <code>Target Token (PAT)</code> field.</p>
+    </section>
+
+    <section class="card">
+        <h3>Recommended Token Access</h3>
+        <p class="text-muted mb-1">Use separate tokens when possible.</p>
+        <ul style="margin-left: 1.5rem;">
+            <li>Source token: read repository contents</li>
+            <li>Target token: read and write repository contents</li>
+        </ul>
+        <p class="text-muted mt-1">GitHub only shows the full token once, and organization-owned repositories may require token approval before use.</p>
+    </section>
+
+    <section class="card">
+        <h3>Create the Mirror First</h3>
+        <p class="text-muted mb-1">Before you can add the webhook, create the mirror configuration in this app with:</p>
+        <ul style="margin-left: 1.5rem;">
+            <li>A mirror name</li>
+            <li>The source repository URL</li>
+            <li>The target repository URL</li>
+            <li>The source token</li>
+            <li>The target token</li>
+        </ul>
+        <p class="text-muted mt-1">After the mirror is created, open its detail page to see the webhook payload URL.</p>
+    </section>
+
+    <section class="card">
+        <h3>Add the Webhook on GitHub</h3>
+        <p class="text-muted mb-1">Configure the webhook on the source repository so GitHub Mirror can react to pushes automatically.</p>
+        <ol style="margin-left: 1.5rem;">
+            <li>Open the source repository on GitHub.</li>
+            <li>Go to <strong>Settings</strong>.</li>
+            <li>Open <strong>Webhooks</strong>.</li>
+            <li>Click <strong>Add webhook</strong>.</li>
+            <li>Paste the <strong>Payload URL</strong> shown on the mirror detail page.</li>
+            <li>Set <strong>Content type</strong> to <code>application/json</code>.</li>
+            <li>Enter the webhook secret if your setup requires one.</li>
+            <li>Choose the <strong>Push</strong> event.</li>
+            <li>Save the webhook.</li>
+        </ol>
+        <p class="text-muted mt-1">Add this webhook to the source repository, not the target repository.</p>
+    </section>
+
+    <section class="card">
+        <h3>Verify the Setup</h3>
+        <p class="text-muted mb-1">After saving the webhook:</p>
+        <ul style="margin-left: 1.5rem;">
+            <li>Return to the mirror detail page</li>
+            <li>Use <code>Test Tokens</code> to confirm credentials still work</li>
+            <li>Use <code>Sync Now</code> to trigger a manual sync</li>
+            <li>Review the sync history for success or failure</li>
+        </ul>
+    </section>
+</div>
+{{end}}

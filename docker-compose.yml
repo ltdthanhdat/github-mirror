@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mirror
+      POSTGRES_PASSWORD: mirrorpass
+      POSTGRES_DB: mirror
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mirror:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      # Database connection
+      DATABASE_URL: postgres://mirror:mirrorpass@db:5432/mirror?sslmode=disable
+      # Encryption key - in production, use a strong random key stored securely
+      APP_ENCRYPTION_KEY: a-very-secret-key-that-is-32-bytes-long!!!
+      # Server address
+      SERVER_ADDRESS: :8080
+      # Basic auth credentials (for simplicity, using environment variables)
+      BASIC_AUTH_USERNAME: admin
+      BASIC_AUTH_PASSWORD: admin123
+    ports:
+      - "8080:8080"
+    command: ["server"]
+
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://mirror:mirrorpass@db:5432/mirror?sslmode=disable
+      APP_ENCRYPTION_KEY: a-very-secret-key-that-is-32-bytes-long!!!
+      BASIC_AUTH_USERNAME: admin
+      BASIC_AUTH_PASSWORD: admin123
+    command: ["worker"]
+
+volumes:
+  postgres_data:

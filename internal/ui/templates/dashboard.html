@@ -1,0 +1,21 @@
+{{define "title"}}Dashboard{{end}}
+
+{{define "content"}}
+<div class="page-header">
+    <div>
+        <h1>Mirror Configurations</h1>
+        <p>Manage repository mirror pairs, trigger manual syncs, and keep an eye on the latest activity from one place.</p>
+    </div>
+    <a href="/mirrors/new" class="btn btn-primary">Create Mirror</a>
+</div>
+<div id="flash">{{if .Flash}}<div class="flash flash-success mb-1">{{.Flash}}</div>{{end}}</div>
+
+<div
+    id="mirror-list"
+    hx-get="/partials/dashboard/mirrors"
+    hx-trigger="load, every 5s, refresh-mirrors from:body"
+    hx-swap="innerHTML"
+>
+    {{template "dashboard_mirror_list" .}}
+</div>
+{{end}}

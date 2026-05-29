@@ -1,0 +1,66 @@
+{{define "title"}}Mirror: {{.Name}}{{end}}
+
+{{define "content"}}
+<div class="page-header">
+    <div>
+        <h1>{{.Name}}</h1>
+        <p>Review mirror configuration, webhook instructions, and the latest sync history before triggering more work.</p>
+    </div>
+</div>
+<div id="flash">{{if .Flash}}<div class="flash flash-success mb-1">{{.Flash}}</div>{{end}}</div>
+
+<div class="split">
+    <div
+        id="mirror-configuration"
+        hx-get="/partials/mirrors/{{.ID}}/configuration"
+        hx-trigger="load, every 5s, refresh-mirror-detail from:body"
+        hx-swap="innerHTML"
+    >
+        {{template "mirror_detail_configuration" .}}
+    </div>
+
+    <div class="stack">
+        <div class="card">
+            <h3>Webhook Setup</h3>
+            <p class="text-muted mb-1">Add this webhook to your source repository on GitHub:</p>
+            <p class="text-muted mb-1">Need the full PAT and webhook walkthrough? Open the <a href="/guide">setup guide</a>.</p>
+            <ol style="margin-left: 1.5rem;">
+                <li><strong>Payload URL:</strong> <code id="webhook-url">https://mirror.example.com/webhooks/github/{{.ID}}</code></li>
+                <li><strong>Content type:</strong> <code>application/json</code></li>
+                <li><strong>Secret:</strong> <code id="webhook-secret">(set during creation - viewable once)</code></li>
+                <li><strong>Events:</strong> Select <strong>Push</strong> events</li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <h3>Actions</h3>
+            <p class="text-muted mb-1">Use these controls to queue manual work, validate tokens, or remove the mirror.</p>
+            <div class="actions">
+                <a href="/mirrors/{{.ID}}/edit" class="btn btn-sm">Edit</a>
+                <form method="post" action="/mirrors/{{.ID}}/sync" hx-post="/mirrors/{{.ID}}/sync" hx-target="#action-response" class="inline">
+                    <button type="submit" class="btn btn-primary btn-sm">Sync Now</button>
+                </form>
+                <form method="post" action="/mirrors/{{.ID}}/retry" hx-post="/mirrors/{{.ID}}/retry" hx-target="#action-response" class="inline">
+                    <button type="submit" class="btn btn-sm">Retry Failed</button>
+                </form>
+                <form method="post" action="/mirrors/{{.ID}}/test" hx-post="/mirrors/{{.ID}}/test" hx-target="#action-response" class="inline">
+                    <button type="submit" class="btn btn-sm">Test Tokens</button>
+                </form>
+                <form method="post" action="/mirrors/{{.ID}}/delete" onsubmit="return confirm('Delete this mirror?')" class="inline">
+                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                </form>
+            </div>
+            <div id="action-response" class="mt-1"></div>
+        </div>
+    </div>
+</div>
+
+<div
+    id="sync-history"
+    hx-get="/partials/mirrors/{{.ID}}/history"
+    hx-trigger="load, every 5s, refresh-mirror-detail from:body"
+    hx-swap="innerHTML"
+>
+    {{template "mirror_detail_history" .}}
+</div>
+{{end}}
