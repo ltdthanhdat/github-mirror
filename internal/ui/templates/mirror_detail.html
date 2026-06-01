@@ -37,6 +37,7 @@
             <p class="text-muted mb-1">Use these controls to queue manual work, validate tokens, or remove the mirror.</p>
             <div class="actions">
                 <a href="/mirrors/{{.ID}}/edit" class="btn btn-sm">Edit</a>
+                <a href="/mirrors/{{.ID}}/schedule" class="btn btn-sm">Edit Schedule</a>
                 <form method="post" action="/mirrors/{{.ID}}/sync" hx-post="/mirrors/{{.ID}}/sync" hx-target="#action-response" class="inline">
                     <button type="submit" class="btn btn-primary btn-sm">Sync Now</button>
                 </form>

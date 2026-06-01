@@ -1,0 +1,35 @@
+{{define "title"}}{{if .PageTitle}}{{.PageTitle}}{{else}}Edit Schedule{{end}}{{end}}
+
+{{define "content"}}
+<div class="page-header">
+    <div>
+        <h1>{{if .FormTitle}}{{.FormTitle}}{{else}}Manage Cron Schedule{{end}}</h1>
+        <p>{{if .FormDescription}}{{.FormDescription}}{{else}}Update or clear the automatic sync schedule for this mirror. Schedules use standard 5-field cron in UTC.{{end}}</p>
+    </div>
+    <a href="{{if .BackURL}}{{.BackURL}}{{else}}/{{end}}" class="btn">Back to Mirror</a>
+</div>
+{{if .ErrorFlash}}<div class="flash flash-error mb-1">{{.ErrorFlash}}</div>{{else if .Flash}}<div class="flash flash-success mb-1">{{.Flash}}</div>{{end}}
+
+<div class="card">
+    <form method="post" action="{{if .FormAction}}{{.FormAction}}{{else}}/mirrors/{{.MirrorID}}/schedule{{end}}">
+        <div class="form-group">
+            <label>Mirror</label>
+            <input type="text" value="{{.MirrorName}}" readonly>
+        </div>
+        <div class="form-group">
+            <label>Cron Schedule</label>
+            <input type="text" name="sync_schedule" placeholder="*/10 * * * *" value="{{.SyncSchedule}}">
+            <p class="text-muted">Optional. Leave blank to disable automatic sync. Use standard 5-field cron in UTC. Examples:</p>
+            <div class="inline-code-list">
+                <code>*/10 * * * *</code>
+                <span class="text-muted">or</span>
+                <code>0 * * * *</code>
+            </div>
+        </div>
+        <div class="actions">
+            <button type="submit" class="btn btn-primary">{{if .SubmitLabel}}{{.SubmitLabel}}{{else}}Save Schedule{{end}}</button>
+            <button type="submit" class="btn" name="sync_schedule" value="">Clear Schedule</button>
+        </div>
+    </form>
+</div>
+{{end}}

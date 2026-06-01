@@ -11,6 +11,7 @@ import (
 
 type MirrorFormRenderer interface {
 	RenderMirrorFormPage(w http.ResponseWriter, data map[string]interface{})
+	RenderMirrorSchedulePage(w http.ResponseWriter, data map[string]interface{})
 }
 
 // Handler holds dependencies for the HTTP handlers.

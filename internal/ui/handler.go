@@ -39,7 +39,7 @@ func loadTemplates() map[string]*template.Template {
 	templateDir := templatesDir()
 	layoutPath := filepath.Join(templateDir, "layout.html")
 	partialsPath := filepath.Join(templateDir, "partials.html")
-	pageFiles := []string{"dashboard.html", "mirror_form.html", "mirror_detail.html", "setup_guide.html"}
+	pageFiles := []string{"dashboard.html", "mirror_form.html", "mirror_detail.html", "mirror_schedule_form.html", "setup_guide.html"}
 	templates := make(map[string]*template.Template, len(pageFiles))
 
 	for _, pageFile := range pageFiles {
@@ -80,6 +80,11 @@ func (h *Handler) render(w http.ResponseWriter, templateName string, data map[st
 // RenderMirrorFormPage renders the mirror form template for create/edit flows.
 func (h *Handler) RenderMirrorFormPage(w http.ResponseWriter, data map[string]interface{}) {
 	h.render(w, "mirror_form.html", data)
+}
+
+// RenderMirrorSchedulePage renders the dedicated schedule edit template.
+func (h *Handler) RenderMirrorSchedulePage(w http.ResponseWriter, data map[string]interface{}) {
+	h.render(w, "mirror_schedule_form.html", data)
 }
 
 func (h *Handler) renderFragment(w http.ResponseWriter, templateName, fragmentName string, data map[string]interface{}) {
@@ -219,6 +224,19 @@ func (h *Handler) EditMirrorForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.render(w, "mirror_form.html", data)
+}
+
+// EditMirrorScheduleForm renders the dedicated mirror schedule form.
+func (h *Handler) EditMirrorScheduleForm(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.authorizedMirrorConfig(r)
+	if err != nil {
+		http.Error(w, err.Error(), uiErrCode(err))
+		return
+	}
+
+	data := mirrorScheduleFormData(cfg, cfg.SyncSchedule)
+	data["Flash"] = r.URL.Query().Get("flash")
+	h.render(w, "mirror_schedule_form.html", data)
 }
 
 // SetupGuide renders the PAT token and webhook setup guide.
@@ -367,6 +385,44 @@ func (h *Handler) mirrorDetailData(r *http.Request) (map[string]interface{}, err
 		"CreatedAt":        cfg.CreatedAt,
 		"Jobs":             jobs,
 	}, nil
+}
+
+func (h *Handler) authorizedMirrorConfig(r *http.Request) (*models.MirrorConfig, error) {
+	user := auth.AuthenticatedUser(r)
+	if user == nil {
+		return nil, errors.New("Unauthorized")
+	}
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return nil, errors.New("Invalid mirror ID")
+	}
+
+	cfg, err := h.MirrorStore.GetMirrorConfig(id)
+	if err != nil {
+		return nil, errors.New("Mirror not found")
+	}
+
+	if cfg.UserID != user.ID && !user.IsAdmin {
+		return nil, errors.New("Forbidden")
+	}
+
+	return cfg, nil
+}
+
+func mirrorScheduleFormData(cfg *models.MirrorConfig, scheduleValue string) map[string]interface{} {
+	return map[string]interface{}{
+		"PageTitle":       "Edit Schedule",
+		"FormAction":      "/mirrors/" + strconv.FormatUint(cfg.ID, 10) + "/schedule",
+		"MirrorID":        cfg.ID,
+		"MirrorName":      cfg.Name,
+		"SyncSchedule":    scheduleValue,
+		"SubmitLabel":     "Save Schedule",
+		"BackURL":         "/mirrors/" + strconv.FormatUint(cfg.ID, 10),
+		"FormTitle":       "Manage Cron Schedule",
+		"FormDescription": "Update or clear the automatic sync schedule for this mirror. Schedules use standard 5-field cron in UTC.",
+	}
 }
 
 func uiErrCode(err error) int {

@@ -370,6 +370,215 @@ func TestUpdateMirrorHandlerRejectsInvalidCronSchedule(t *testing.T) {
 	}
 }
 
+func TestEditMirrorScheduleFormRendersCurrentValue(t *testing.T) {
+	userStore, mirrorStore, jobStore := newMirrorHandlerTestDeps(t)
+	handler := &Handler{}
+	router := NewRouter(handler, userStore, mirrorStore, jobStore)
+
+	cfg := &models.MirrorConfig{
+		UserID:           1,
+		Name:             "Scheduled Mirror",
+		SourceOwner:      "source-org",
+		SourceRepo:       "source-repo",
+		SourceRepoURL:    "https://github.com/source-org/source-repo.git",
+		TargetOwner:      "target-org",
+		TargetRepo:       "target-repo",
+		TargetRepoURL:    "https://github.com/target-org/target-repo.git",
+		BranchPattern:    "*",
+		SyncSchedule:     "0 * * * *",
+		SyncTags:         true,
+		AllowForceUpdate: true,
+		Enabled:          true,
+	}
+	if err := mirrorStore.CreateMirrorConfig(cfg); err != nil {
+		t.Fatalf("create mirror config: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/mirrors/1/schedule", nil)
+	req.Header.Set("Authorization", basicAuthHeader("demo@example.com", "secret123"))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Manage Cron Schedule") {
+		t.Fatalf("expected schedule form title, got %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "0 * * * *") || !strings.Contains(rec.Body.String(), "UTC") {
+		t.Fatalf("expected schedule form to show current value and UTC guidance, got %q", rec.Body.String())
+	}
+}
+
+func TestUpdateMirrorScheduleHandlerPersistsOnlySchedule(t *testing.T) {
+	userStore, mirrorStore, jobStore := newMirrorHandlerTestDeps(t)
+	handler := &Handler{}
+	router := NewRouter(handler, userStore, mirrorStore, jobStore)
+
+	cfg := &models.MirrorConfig{
+		UserID:           1,
+		Name:             "Original",
+		SourceOwner:      "source-org",
+		SourceRepo:       "source-repo",
+		SourceRepoURL:    "https://github.com/source-org/source-repo.git",
+		TargetOwner:      "target-org",
+		TargetRepo:       "target-repo",
+		TargetRepoURL:    "https://github.com/target-org/target-repo.git",
+		SourceTokenEnc:   "source-old-token",
+		TargetTokenEnc:   "target-old-token",
+		BranchPattern:    "release/*",
+		SyncSchedule:     "",
+		SyncTags:         true,
+		SyncDeletes:      true,
+		AllowForceUpdate: false,
+		Enabled:          true,
+	}
+	if err := mirrorStore.CreateMirrorConfig(cfg); err != nil {
+		t.Fatalf("create mirror config: %v", err)
+	}
+
+	form := url.Values{
+		"sync_schedule": {"*/30 * * * *"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mirrors/1/schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Authorization", basicAuthHeader("demo@example.com", "secret123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Current-URL", "http://example.com/mirrors/1/schedule")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("HX-Location"); got != "/mirrors/1?flash=Automatic+sync+schedule+updated." {
+		t.Fatalf("expected HX-Location header, got %q", got)
+	}
+
+	updated, err := mirrorStore.GetMirrorConfig(cfg.ID)
+	if err != nil {
+		t.Fatalf("get mirror config: %v", err)
+	}
+	if updated.SyncSchedule != "*/30 * * * *" {
+		t.Fatalf("expected updated sync schedule, got %q", updated.SyncSchedule)
+	}
+	if updated.Name != "Original" || updated.BranchPattern != "release/*" {
+		t.Fatalf("expected unrelated fields to remain unchanged, got name=%q branch=%q", updated.Name, updated.BranchPattern)
+	}
+	if updated.SourceTokenEnc != "source-old-token" || updated.TargetTokenEnc != "target-old-token" {
+		t.Fatalf("expected tokens to remain unchanged, got %q %q", updated.SourceTokenEnc, updated.TargetTokenEnc)
+	}
+}
+
+func TestUpdateMirrorScheduleHandlerClearsSchedule(t *testing.T) {
+	userStore, mirrorStore, jobStore := newMirrorHandlerTestDeps(t)
+	handler := &Handler{}
+	router := NewRouter(handler, userStore, mirrorStore, jobStore)
+
+	cfg := &models.MirrorConfig{
+		UserID:           1,
+		Name:             "Original",
+		SourceOwner:      "source-org",
+		SourceRepo:       "source-repo",
+		SourceRepoURL:    "https://github.com/source-org/source-repo.git",
+		TargetOwner:      "target-org",
+		TargetRepo:       "target-repo",
+		TargetRepoURL:    "https://github.com/target-org/target-repo.git",
+		SyncSchedule:     "*/10 * * * *",
+		SyncTags:         true,
+		AllowForceUpdate: true,
+		Enabled:          true,
+	}
+	if err := mirrorStore.CreateMirrorConfig(cfg); err != nil {
+		t.Fatalf("create mirror config: %v", err)
+	}
+
+	form := url.Values{
+		"sync_schedule": {""},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mirrors/1/schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Authorization", basicAuthHeader("demo@example.com", "secret123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusSeeOther, rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/mirrors/1?flash=Automatic+sync+schedule+cleared." {
+		t.Fatalf("expected redirect location, got %q", got)
+	}
+
+	updated, err := mirrorStore.GetMirrorConfig(cfg.ID)
+	if err != nil {
+		t.Fatalf("get mirror config: %v", err)
+	}
+	if updated.SyncSchedule != "" {
+		t.Fatalf("expected sync schedule to be cleared, got %q", updated.SyncSchedule)
+	}
+}
+
+func TestUpdateMirrorScheduleHandlerRejectsInvalidCron(t *testing.T) {
+	userStore, mirrorStore, jobStore := newMirrorHandlerTestDeps(t)
+	handler := &Handler{}
+	router := NewRouter(handler, userStore, mirrorStore, jobStore)
+
+	cfg := &models.MirrorConfig{
+		UserID:           1,
+		Name:             "Original",
+		SourceOwner:      "source-org",
+		SourceRepo:       "source-repo",
+		SourceRepoURL:    "https://github.com/source-org/source-repo.git",
+		TargetOwner:      "target-org",
+		TargetRepo:       "target-repo",
+		TargetRepoURL:    "https://github.com/target-org/target-repo.git",
+		BranchPattern:    "*",
+		SyncSchedule:     "*/10 * * * *",
+		SyncTags:         true,
+		AllowForceUpdate: true,
+		Enabled:          true,
+	}
+	if err := mirrorStore.CreateMirrorConfig(cfg); err != nil {
+		t.Fatalf("create mirror config: %v", err)
+	}
+
+	form := url.Values{
+		"sync_schedule": {"bad cron"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mirrors/1/schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Authorization", basicAuthHeader("demo@example.com", "secret123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Current-URL", "http://example.com/mirrors/1/schedule")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Invalid cron schedule") {
+		t.Fatalf("expected invalid cron message, got %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "bad cron") {
+		t.Fatalf("expected submitted value to be preserved, got %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("HX-Replace-Url"); got != "/mirrors/1/schedule" {
+		t.Fatalf("expected HX-Replace-Url to keep schedule form URL, got %q", got)
+	}
+
+	updated, err := mirrorStore.GetMirrorConfig(cfg.ID)
+	if err != nil {
+		t.Fatalf("get mirror config: %v", err)
+	}
+	if updated.SyncSchedule != "*/10 * * * *" {
+		t.Fatalf("expected existing sync schedule to remain unchanged, got %q", updated.SyncSchedule)
+	}
+}
+
 func TestDeleteMirrorHandlerUsesHXLocationForBoostedForms(t *testing.T) {
 	userStore, mirrorStore, jobStore := newMirrorHandlerTestDeps(t)
 	handler := &Handler{}
@@ -698,6 +907,44 @@ func TestPartialsRenderUpdatedHTML(t *testing.T) {
 	}
 	if !strings.Contains(configRec.Body.String(), "*/15 * * * *") || !strings.Contains(configRec.Body.String(), "UTC") {
 		t.Fatalf("expected config partial to show sync schedule, got %q", configRec.Body.String())
+	}
+}
+
+func TestMirrorDetailPageShowsEditScheduleAction(t *testing.T) {
+	userStore, mirrorStore, jobStore := newMirrorHandlerTestDeps(t)
+	handler := &Handler{}
+	router := NewRouter(handler, userStore, mirrorStore, jobStore)
+
+	cfg := &models.MirrorConfig{
+		UserID:           1,
+		Name:             "Mirror Detail",
+		SourceOwner:      "source-org",
+		SourceRepo:       "source-repo",
+		SourceRepoURL:    "https://github.com/source-org/source-repo.git",
+		TargetOwner:      "target-org",
+		TargetRepo:       "target-repo",
+		TargetRepoURL:    "https://github.com/target-org/target-repo.git",
+		SyncSchedule:     "0 * * * *",
+		BranchPattern:    "*",
+		SyncTags:         true,
+		AllowForceUpdate: true,
+		Enabled:          true,
+	}
+	if err := mirrorStore.CreateMirrorConfig(cfg); err != nil {
+		t.Fatalf("create mirror config: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/mirrors/1", nil)
+	req.Header.Set("Authorization", basicAuthHeader("demo@example.com", "secret123"))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "/mirrors/1/schedule") || !strings.Contains(rec.Body.String(), "Edit Schedule") {
+		t.Fatalf("expected detail page to expose schedule action, got %q", rec.Body.String())
 	}
 }
 

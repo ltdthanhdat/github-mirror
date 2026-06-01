@@ -283,6 +283,64 @@ func (h *Handler) UpdateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(cfg)
 }
 
+// UpdateMirrorScheduleHandler updates only the persisted mirror schedule.
+func (h *Handler) UpdateMirrorScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	cfg, err := getMirrorFromRequest(r, h)
+	if err != nil {
+		http.Error(w, err.Error(), errCode(err))
+		return
+	}
+
+	rawSchedule := ""
+	switch {
+	case isJSONRequest(r):
+		var req struct {
+			SyncSchedule string `json:"sync_schedule"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		rawSchedule = req.SyncSchedule
+	default:
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Invalid form data", http.StatusBadRequest)
+			return
+		}
+		rawSchedule = r.FormValue("sync_schedule")
+	}
+
+	if err := validateMirrorSyncSchedule(rawSchedule); err != nil {
+		if renderMirrorScheduleErrorIfHTML(w, r, h, cfg, rawSchedule, err.Error()) {
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cfg.SyncSchedule = strings.TrimSpace(rawSchedule)
+	if err := h.MirrorStore.UpdateMirrorConfig(cfg); err != nil {
+		http.Error(w, "Failed to update mirror schedule", http.StatusInternalServerError)
+		return
+	}
+
+	message := "Automatic sync schedule cleared."
+	if cfg.SyncSchedule != "" {
+		message = "Automatic sync schedule updated."
+	}
+
+	if isHTMLRequest(r) {
+		navigateOrRedirectHTMX(w, r, fmt.Sprintf("/mirrors/%d", cfg.ID), flashHTML(message, false))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"sync_schedule": cfg.SyncSchedule,
+		"message":       message,
+	})
+}
+
 // GetMirrorHandler returns a specific mirror configuration.
 func (h *Handler) GetMirrorHandler(w http.ResponseWriter, r *http.Request) {
 	user := auth.AuthenticatedUser(r)
@@ -777,6 +835,20 @@ func renderMirrorFormErrorIfHTML(w http.ResponseWriter, r *http.Request, h *Hand
 	return true
 }
 
+func renderMirrorScheduleErrorIfHTML(w http.ResponseWriter, r *http.Request, h *Handler, cfg *models.MirrorConfig, rawSchedule, message string) bool {
+	if !isHTMLRequest(r) || h.UIRenderer == nil {
+		return false
+	}
+
+	data := mirrorScheduleFormData(cfg, strings.TrimSpace(rawSchedule))
+	data["ErrorFlash"] = message
+	if currentPath := currentHTMXPath(r); currentPath != "" {
+		w.Header().Set("HX-Replace-Url", currentPath)
+	}
+	h.UIRenderer.RenderMirrorSchedulePage(w, data)
+	return true
+}
+
 func newMirrorFormData(req mirrorFormRequest) map[string]interface{} {
 	syncTags := true
 	if req.SyncTags != nil {
@@ -824,6 +896,20 @@ func editMirrorFormData(cfg *models.MirrorConfig, req mirrorFormRequest) map[str
 	data["SubmitLabel"] = "Update Mirror"
 	data["IsEdit"] = true
 	return data
+}
+
+func mirrorScheduleFormData(cfg *models.MirrorConfig, scheduleValue string) map[string]interface{} {
+	return map[string]interface{}{
+		"PageTitle":       "Edit Schedule",
+		"FormAction":      fmt.Sprintf("/mirrors/%d/schedule", cfg.ID),
+		"MirrorID":        cfg.ID,
+		"MirrorName":      cfg.Name,
+		"SyncSchedule":    strings.TrimSpace(scheduleValue),
+		"SubmitLabel":     "Save Schedule",
+		"BackURL":         fmt.Sprintf("/mirrors/%d", cfg.ID),
+		"FormTitle":       "Manage Cron Schedule",
+		"FormDescription": "Update or clear the automatic sync schedule for this mirror. Schedules use standard 5-field cron in UTC.",
+	}
 }
 
 func validateMirrorSyncSchedule(raw string) error {
