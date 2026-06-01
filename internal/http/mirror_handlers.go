@@ -15,12 +15,26 @@ import (
 	"github.com/dat-lt-amira/github-mirror/internal/auth"
 	"github.com/dat-lt-amira/github-mirror/internal/mirror"
 	"github.com/dat-lt-amira/github-mirror/internal/models"
+	"github.com/dat-lt-amira/github-mirror/internal/schedule"
 	"github.com/go-chi/chi/v5"
 )
 
 var githubAPIBaseURL = "https://api.github.com"
 
 var githubAPIClient = &http.Client{Timeout: 5 * time.Second}
+
+type mirrorFormRequest struct {
+	Name             string `json:"name"`
+	SourceURL        string `json:"source_url"`
+	TargetURL        string `json:"target_url"`
+	SourceToken      string `json:"source_token"`
+	TargetToken      string `json:"target_token"`
+	BranchPattern    string `json:"branch_pattern"`
+	SyncSchedule     string `json:"sync_schedule"`
+	SyncTags         *bool  `json:"sync_tags"`
+	SyncDeletes      *bool  `json:"sync_deletes"`
+	AllowForceUpdate *bool  `json:"allow_force_update"`
+}
 
 // ListMirrorsHandler returns all mirror configurations for the authenticated user.
 func (h *Handler) ListMirrorsHandler(w http.ResponseWriter, r *http.Request) {
@@ -48,17 +62,7 @@ func (h *Handler) CreateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name             string `json:"name"`
-		SourceURL        string `json:"source_url"`
-		TargetURL        string `json:"target_url"`
-		SourceToken      string `json:"source_token"`
-		TargetToken      string `json:"target_token"`
-		BranchPattern    string `json:"branch_pattern"`
-		SyncTags         *bool  `json:"sync_tags"`
-		SyncDeletes      *bool  `json:"sync_deletes"`
-		AllowForceUpdate *bool  `json:"allow_force_update"`
-	}
+	var req mirrorFormRequest
 
 	switch {
 	case isJSONRequest(r):
@@ -77,6 +81,7 @@ func (h *Handler) CreateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 		req.SourceToken = r.FormValue("source_token")
 		req.TargetToken = r.FormValue("target_token")
 		req.BranchPattern = r.FormValue("branch_pattern")
+		req.SyncSchedule = r.FormValue("sync_schedule")
 		req.SyncTags = boolPtr(r.Form.Has("sync_tags"))
 		req.SyncDeletes = boolPtr(r.Form.Has("sync_deletes"))
 		req.AllowForceUpdate = boolPtr(r.Form.Has("allow_force_update"))
@@ -87,6 +92,13 @@ func (h *Handler) CreateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+	if err := validateMirrorSyncSchedule(req.SyncSchedule); err != nil {
+		if renderMirrorFormErrorIfHTML(w, r, h, newMirrorFormData(req), err.Error()) {
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -127,6 +139,7 @@ func (h *Handler) CreateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 		SyncTags:         true,
 		SyncDeletes:      false,
 		AllowForceUpdate: true,
+		SyncSchedule:     strings.TrimSpace(req.SyncSchedule),
 		Enabled:          true,
 	}
 
@@ -149,16 +162,7 @@ func (h *Handler) CreateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue initial sync job
-	initialJob := &models.SyncJob{
-		MirrorConfigID: cfg.ID,
-		Ref:            "refs/heads/*",
-		RefType:        "branch",
-		BranchOrTag:    "*",
-		AfterSHA:       "0000000",
-		Status:         "queued",
-		MaxAttempts:    3,
-		CreatedAt:      time.Now(),
-	}
+	initialJob := enqueueFullSyncJob(cfg.ID)
 	h.JobStore.CreateJob(initialJob)
 	log.Printf("Initial sync job enqueued for mirror %d", cfg.ID)
 
@@ -180,17 +184,7 @@ func (h *Handler) UpdateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name             string `json:"name"`
-		SourceURL        string `json:"source_url"`
-		TargetURL        string `json:"target_url"`
-		SourceToken      string `json:"source_token"`
-		TargetToken      string `json:"target_token"`
-		BranchPattern    string `json:"branch_pattern"`
-		SyncTags         *bool  `json:"sync_tags"`
-		SyncDeletes      *bool  `json:"sync_deletes"`
-		AllowForceUpdate *bool  `json:"allow_force_update"`
-	}
+	var req mirrorFormRequest
 
 	switch {
 	case isJSONRequest(r):
@@ -209,6 +203,7 @@ func (h *Handler) UpdateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 		req.SourceToken = r.FormValue("source_token")
 		req.TargetToken = r.FormValue("target_token")
 		req.BranchPattern = r.FormValue("branch_pattern")
+		req.SyncSchedule = r.FormValue("sync_schedule")
 		req.SyncTags = boolPtr(r.Form.Has("sync_tags"))
 		req.SyncDeletes = boolPtr(r.Form.Has("sync_deletes"))
 		req.AllowForceUpdate = boolPtr(r.Form.Has("allow_force_update"))
@@ -219,6 +214,13 @@ func (h *Handler) UpdateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+	if err := validateMirrorSyncSchedule(req.SyncSchedule); err != nil {
+		if renderMirrorFormErrorIfHTML(w, r, h, editMirrorFormData(cfg, req), err.Error()) {
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -247,6 +249,7 @@ func (h *Handler) UpdateMirrorHandler(w http.ResponseWriter, r *http.Request) {
 	cfg.TargetRepo = targetRepo
 	cfg.TargetRepoURL = targetRepoURL
 	cfg.BranchPattern = req.BranchPattern
+	cfg.SyncSchedule = strings.TrimSpace(req.SyncSchedule)
 	if cfg.BranchPattern == "" {
 		cfg.BranchPattern = "*"
 	}
@@ -473,18 +476,7 @@ func (h *Handler) SyncMirrorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue a sync job that mirrors all branches
-	job := &models.SyncJob{
-		MirrorConfigID: cfg.ID,
-		Ref:            "refs/heads/*",
-		RefType:        "branch",
-		BranchOrTag:    "*",
-		AfterSHA:       "0000000",
-		Deleted:        false,
-		Status:         "queued",
-		Attempts:       0,
-		MaxAttempts:    3,
-		CreatedAt:      time.Now(),
-	}
+	job := enqueueFullSyncJob(cfg.ID)
 
 	if err := h.JobStore.CreateJob(job); err != nil {
 		http.Error(w, "Failed to enqueue sync job", http.StatusInternalServerError)
@@ -785,17 +777,7 @@ func renderMirrorFormErrorIfHTML(w http.ResponseWriter, r *http.Request, h *Hand
 	return true
 }
 
-func newMirrorFormData(req struct {
-	Name             string `json:"name"`
-	SourceURL        string `json:"source_url"`
-	TargetURL        string `json:"target_url"`
-	SourceToken      string `json:"source_token"`
-	TargetToken      string `json:"target_token"`
-	BranchPattern    string `json:"branch_pattern"`
-	SyncTags         *bool  `json:"sync_tags"`
-	SyncDeletes      *bool  `json:"sync_deletes"`
-	AllowForceUpdate *bool  `json:"allow_force_update"`
-}) map[string]interface{} {
+func newMirrorFormData(req mirrorFormRequest) map[string]interface{} {
 	syncTags := true
 	if req.SyncTags != nil {
 		syncTags = *req.SyncTags
@@ -826,23 +808,14 @@ func newMirrorFormData(req struct {
 		"SourceURL":        req.SourceURL,
 		"TargetURL":        req.TargetURL,
 		"BranchPattern":    branchPattern,
+		"SyncSchedule":     req.SyncSchedule,
 		"SyncTags":         syncTags,
 		"SyncDeletes":      syncDeletes,
 		"AllowForceUpdate": allowForceUpdate,
 	}
 }
 
-func editMirrorFormData(cfg *models.MirrorConfig, req struct {
-	Name             string `json:"name"`
-	SourceURL        string `json:"source_url"`
-	TargetURL        string `json:"target_url"`
-	SourceToken      string `json:"source_token"`
-	TargetToken      string `json:"target_token"`
-	BranchPattern    string `json:"branch_pattern"`
-	SyncTags         *bool  `json:"sync_tags"`
-	SyncDeletes      *bool  `json:"sync_deletes"`
-	AllowForceUpdate *bool  `json:"allow_force_update"`
-}) map[string]interface{} {
+func editMirrorFormData(cfg *models.MirrorConfig, req mirrorFormRequest) map[string]interface{} {
 	data := newMirrorFormData(req)
 	data["PageTitle"] = "Edit Mirror"
 	data["FormAction"] = fmt.Sprintf("/mirrors/%d", cfg.ID)
@@ -851,4 +824,30 @@ func editMirrorFormData(cfg *models.MirrorConfig, req struct {
 	data["SubmitLabel"] = "Update Mirror"
 	data["IsEdit"] = true
 	return data
+}
+
+func validateMirrorSyncSchedule(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	if err := schedule.ValidateCron(value); err != nil {
+		return fmt.Errorf("Invalid cron schedule")
+	}
+	return nil
+}
+
+func enqueueFullSyncJob(mirrorConfigID uint64) *models.SyncJob {
+	return &models.SyncJob{
+		MirrorConfigID: mirrorConfigID,
+		Ref:            "refs/heads/*",
+		RefType:        "branch",
+		BranchOrTag:    "*",
+		AfterSHA:       "0000000",
+		Deleted:        false,
+		Status:         "queued",
+		Attempts:       0,
+		MaxAttempts:    3,
+		CreatedAt:      time.Now(),
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dat-lt-amira/github-mirror/internal/models"
 )
@@ -29,6 +30,7 @@ func TestPostgresMirrorConfigStoreCRUDAndPersistence(t *testing.T) {
 		SyncTags:         true,
 		SyncDeletes:      true,
 		AllowForceUpdate: true,
+		SyncSchedule:     "*/10 * * * *",
 		Enabled:          true,
 	}
 
@@ -46,9 +48,14 @@ func TestPostgresMirrorConfigStoreCRUDAndPersistence(t *testing.T) {
 	if loaded.Name != cfg.Name || loaded.TargetRepoURL != cfg.TargetRepoURL {
 		t.Fatalf("unexpected loaded mirror config: %+v", loaded)
 	}
+	if loaded.SyncSchedule != "*/10 * * * *" {
+		t.Fatalf("expected sync schedule to persist, got %q", loaded.SyncSchedule)
+	}
 
 	loaded.Name = "prod-mirror-updated"
 	loaded.BranchPattern = "release/*"
+	scheduledAt := time.Date(2026, 6, 1, 1, 0, 0, 0, time.UTC)
+	loaded.LastScheduledAt = &scheduledAt
 	if err := reopenedStore.UpdateMirrorConfig(loaded); err != nil {
 		t.Fatalf("update mirror config: %v", err)
 	}
@@ -59,6 +66,17 @@ func TestPostgresMirrorConfigStoreCRUDAndPersistence(t *testing.T) {
 	}
 	if len(configs) != 1 || configs[0].Name != "prod-mirror-updated" {
 		t.Fatalf("unexpected mirror config list: %+v", configs)
+	}
+	if configs[0].LastScheduledAt == nil || !configs[0].LastScheduledAt.Equal(scheduledAt) {
+		t.Fatalf("expected last scheduled at to persist, got %+v", configs[0].LastScheduledAt)
+	}
+
+	scheduledConfigs, err := reopenedStore.ListScheduledMirrorConfigs()
+	if err != nil {
+		t.Fatalf("list scheduled mirror configs: %v", err)
+	}
+	if len(scheduledConfigs) != 1 || scheduledConfigs[0].ID != cfg.ID {
+		t.Fatalf("unexpected scheduled mirror configs: %+v", scheduledConfigs)
 	}
 
 	if err := reopenedStore.DeleteMirrorConfig(cfg.ID); err != nil {
@@ -133,6 +151,13 @@ func TestPostgresSyncJobStoreSharedClaiming(t *testing.T) {
 	if loaded.Status != "succeeded" {
 		t.Fatalf("expected succeeded status, got %+v", loaded)
 	}
+	active, err := jobStore.HasActiveJobForMirror(cfg.ID)
+	if err != nil {
+		t.Fatalf("has active job after completion: %v", err)
+	}
+	if active {
+		t.Fatalf("expected no active job after completion")
+	}
 
 	next, err := jobStore.ClaimNextJob()
 	if err != nil {
@@ -140,6 +165,54 @@ func TestPostgresSyncJobStoreSharedClaiming(t *testing.T) {
 	}
 	if next != nil {
 		t.Fatalf("expected no further jobs, got %+v", next)
+	}
+}
+
+func TestPostgresSyncJobStoreReportsActiveJobs(t *testing.T) {
+	db := openTestPostgresDB(t)
+	mirrorStore := NewPostgresMirrorConfigStore(db)
+	userID := createTestUser(t, db, "owner@example.com")
+	cfg := &models.MirrorConfig{
+		UserID:           userID,
+		Name:             "job-owner",
+		SourceOwner:      "source-org",
+		SourceRepo:       "source-repo",
+		SourceRepoURL:    "https://github.com/source-org/source-repo.git",
+		TargetOwner:      "target-org",
+		TargetRepo:       "target-repo",
+		TargetRepoURL:    "https://github.com/target-org/target-repo.git",
+		SourceTokenEnc:   "source-token",
+		TargetTokenEnc:   "target-token",
+		WebhookSecretEnc: "secret",
+		BranchPattern:    "*",
+		SyncTags:         true,
+		AllowForceUpdate: true,
+		SyncSchedule:     "*/5 * * * *",
+		Enabled:          true,
+	}
+	if err := mirrorStore.CreateMirrorConfig(cfg); err != nil {
+		t.Fatalf("create mirror config: %v", err)
+	}
+	jobStore := NewPostgresSyncJobStore(db)
+
+	job := &models.SyncJob{
+		MirrorConfigID: cfg.ID,
+		Ref:            "refs/heads/*",
+		RefType:        "branch",
+		BranchOrTag:    "*",
+		Status:         "queued",
+		MaxAttempts:    3,
+	}
+	if err := jobStore.CreateJob(job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	active, err := jobStore.HasActiveJobForMirror(cfg.ID)
+	if err != nil {
+		t.Fatalf("has active job: %v", err)
+	}
+	if !active {
+		t.Fatalf("expected queued job to count as active")
 	}
 }
 

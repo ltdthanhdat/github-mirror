@@ -56,6 +56,11 @@
                     <input type="text" name="branch_pattern" placeholder="* (all branches)" value="{{.BranchPattern}}">
                 </div>
                 <div class="form-group">
+                    <label>Cron Schedule</label>
+                    <input type="text" name="sync_schedule" placeholder="*/10 * * * *" value="{{.SyncSchedule}}">
+                    <p class="text-muted">Optional. Use standard 5-field cron in UTC, for example <code>*/10 * * * *</code> or <code>0 * * * *</code>.</p>
+                </div>
+                <div class="form-group">
                     <div class="checkbox">
                         <input type="checkbox" name="sync_tags" {{if .SyncTags}}checked{{end}}>
                         <label>Sync tags</label>

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -59,6 +60,22 @@ func (s *InMemoryMirrorConfigStore) ListMirrorConfigsByUser(userID uint64) ([]*m
 	return result, nil
 }
 
+func (s *InMemoryMirrorConfigStore) ListScheduledMirrorConfigs() ([]*models.MirrorConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []*models.MirrorConfig
+	for _, cfg := range s.configs {
+		if cfg.Enabled && cfg.SyncSchedule != "" {
+			result = append(result, cfg)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID < result[j].ID
+	})
+	return result, nil
+}
+
 func (s *InMemoryMirrorConfigStore) UpdateMirrorConfig(cfg *models.MirrorConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -84,9 +101,9 @@ func (s *InMemoryMirrorConfigStore) DeleteMirrorConfig(id uint64) error {
 
 // InMemorySyncJobStore implements SyncJobStore with an in-memory map.
 type InMemorySyncJobStore struct {
-	mu      sync.RWMutex
-	jobs    map[uint64]*models.SyncJob
-	nextID  uint64
+	mu     sync.RWMutex
+	jobs   map[uint64]*models.SyncJob
+	nextID uint64
 }
 
 // NewInMemorySyncJobStore creates a new in-memory sync job store.
@@ -131,6 +148,18 @@ func (s *InMemorySyncJobStore) ListJobsByMirrorConfig(mirrorConfigID uint64) ([]
 		}
 	}
 	return result, nil
+}
+
+func (s *InMemorySyncJobStore) HasActiveJobForMirror(mirrorConfigID uint64) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, job := range s.jobs {
+		if job.MirrorConfigID == mirrorConfigID && (job.Status == "queued" || job.Status == "running") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *InMemorySyncJobStore) ClaimNextJob() (*models.SyncJob, error) {

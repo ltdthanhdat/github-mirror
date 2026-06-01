@@ -40,5 +40,17 @@ services:
       BASIC_AUTH_PASSWORD: admin123
     command: ["worker"]
 
+  scheduler:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://mirror:mirrorpass@db:5432/mirror?sslmode=disable
+      APP_ENCRYPTION_KEY: a-very-secret-key-that-is-32-bytes-long!!!
+      BASIC_AUTH_USERNAME: admin
+      BASIC_AUTH_PASSWORD: admin123
+    command: ["scheduler"]
+
 volumes:
   postgres_data:

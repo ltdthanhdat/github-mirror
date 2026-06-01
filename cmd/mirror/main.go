@@ -21,7 +21,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: mirror <server|worker>")
+		fmt.Println("Usage: mirror <server|worker|scheduler>")
 		os.Exit(1)
 	}
 
@@ -30,9 +30,11 @@ func main() {
 		runServer()
 	case "worker":
 		runWorker()
+	case "scheduler":
+		runScheduler()
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
-		fmt.Println("Usage: mirror <server|worker>")
+		fmt.Println("Usage: mirror <server|worker|scheduler>")
 		os.Exit(1)
 	}
 }
@@ -113,6 +115,29 @@ func runWorker() {
 	log.Printf("Worker starting (cache: %s)", cacheDir)
 	worker.Run(ctx)
 	log.Println("Worker stopped")
+}
+
+func runScheduler() {
+	runtimeDeps, err := initRuntime()
+	if err != nil {
+		log.Fatalf("initialize runtime: %v", err)
+	}
+	defer runtimeDeps.db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+		log.Println("Scheduler: received shutdown signal...")
+		cancel()
+	}()
+
+	log.Printf("Scheduler starting (poll interval: %s)", schedulerPollInterval())
+	newScheduler(runtimeDeps.mirrorStore, runtimeDeps.jobStore).Run(ctx)
+	log.Println("Scheduler stopped")
 }
 
 func newWorker(mirrorStore store.MirrorConfigStore, jobStore store.SyncJobStore, cacheDir string) *mirror.Worker {

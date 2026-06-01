@@ -111,14 +111,14 @@ func (s *PostgresMirrorConfigStore) CreateMirrorConfig(cfg *models.MirrorConfig)
 			target_owner, target_repo, target_repo_url,
 			source_token_enc, target_token_enc, webhook_secret_enc,
 			branch_pattern, sync_tags, sync_deletes, allow_force_update,
-			enabled, last_synced_at
+			sync_schedule, enabled, last_synced_at, last_scheduled_at
 		) VALUES (
 			$1, $2,
 			$3, $4, $5,
 			$6, $7, $8,
 			$9, $10, $11,
 			$12, $13, $14, $15,
-			$16, $17
+			$16, $17, $18, $19
 		)
 		RETURNING id, created_at, updated_at
 	`,
@@ -127,7 +127,7 @@ func (s *PostgresMirrorConfigStore) CreateMirrorConfig(cfg *models.MirrorConfig)
 		cfg.TargetOwner, cfg.TargetRepo, cfg.TargetRepoURL,
 		cfg.SourceTokenEnc, cfg.TargetTokenEnc, cfg.WebhookSecretEnc,
 		cfg.BranchPattern, cfg.SyncTags, cfg.SyncDeletes, cfg.AllowForceUpdate,
-		cfg.Enabled, cfg.LastSyncedAt,
+		nullableString(cfg.SyncSchedule), cfg.Enabled, cfg.LastSyncedAt, cfg.LastScheduledAt,
 	).Scan(&cfg.ID, &cfg.CreatedAt, &cfg.UpdatedAt)
 }
 
@@ -139,7 +139,7 @@ func (s *PostgresMirrorConfigStore) GetMirrorConfig(id uint64) (*models.MirrorCo
 			target_owner, target_repo, target_repo_url,
 			source_token_enc, target_token_enc, webhook_secret_enc,
 			branch_pattern, sync_tags, sync_deletes, allow_force_update,
-			enabled, last_synced_at, created_at, updated_at
+			sync_schedule, enabled, last_synced_at, last_scheduled_at, created_at, updated_at
 		FROM mirror_configs
 		WHERE id = $1
 	`, id)
@@ -159,11 +159,42 @@ func (s *PostgresMirrorConfigStore) ListMirrorConfigsByUser(userID uint64) ([]*m
 			target_owner, target_repo, target_repo_url,
 			source_token_enc, target_token_enc, webhook_secret_enc,
 			branch_pattern, sync_tags, sync_deletes, allow_force_update,
-			enabled, last_synced_at, created_at, updated_at
+			sync_schedule, enabled, last_synced_at, last_scheduled_at, created_at, updated_at
 		FROM mirror_configs
 		WHERE user_id = $1
 		ORDER BY id
 	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var configs []*models.MirrorConfig
+	for rows.Next() {
+		cfg, err := scanMirrorConfig(rows)
+		if err != nil {
+			return nil, err
+		}
+		configs = append(configs, cfg)
+	}
+	return configs, rows.Err()
+}
+
+func (s *PostgresMirrorConfigStore) ListScheduledMirrorConfigs() ([]*models.MirrorConfig, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			id, user_id, name,
+			source_owner, source_repo, source_repo_url,
+			target_owner, target_repo, target_repo_url,
+			source_token_enc, target_token_enc, webhook_secret_enc,
+			branch_pattern, sync_tags, sync_deletes, allow_force_update,
+			sync_schedule, enabled, last_synced_at, last_scheduled_at, created_at, updated_at
+		FROM mirror_configs
+		WHERE enabled = TRUE
+		  AND sync_schedule IS NOT NULL
+		  AND sync_schedule <> ''
+		ORDER BY id
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +230,10 @@ func (s *PostgresMirrorConfigStore) UpdateMirrorConfig(cfg *models.MirrorConfig)
 			sync_tags = $14,
 			sync_deletes = $15,
 			allow_force_update = $16,
-			enabled = $17,
-			last_synced_at = $18,
+			sync_schedule = $17,
+			enabled = $18,
+			last_synced_at = $19,
+			last_scheduled_at = $20,
 			updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at
@@ -221,8 +254,10 @@ func (s *PostgresMirrorConfigStore) UpdateMirrorConfig(cfg *models.MirrorConfig)
 		cfg.SyncTags,
 		cfg.SyncDeletes,
 		cfg.AllowForceUpdate,
+		nullableString(cfg.SyncSchedule),
 		cfg.Enabled,
 		cfg.LastSyncedAt,
+		cfg.LastScheduledAt,
 	)
 	if err := row.Scan(&cfg.UpdatedAt); errors.Is(err, sql.ErrNoRows) {
 		return errors.New("mirror config not found")
@@ -323,6 +358,19 @@ func (s *PostgresSyncJobStore) ListJobsByMirrorConfig(mirrorConfigID uint64) ([]
 	return jobs, rows.Err()
 }
 
+func (s *PostgresSyncJobStore) HasActiveJobForMirror(mirrorConfigID uint64) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM sync_jobs
+			WHERE mirror_config_id = $1
+			  AND status IN ('queued', 'running')
+		)
+	`, mirrorConfigID).Scan(&exists)
+	return exists, err
+}
+
 func (s *PostgresSyncJobStore) ClaimNextJob() (*models.SyncJob, error) {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -411,6 +459,7 @@ type mirrorConfigScanner interface {
 
 func scanMirrorConfig(scanner mirrorConfigScanner) (*models.MirrorConfig, error) {
 	cfg := &models.MirrorConfig{}
+	var syncSchedule sql.NullString
 	if err := scanner.Scan(
 		&cfg.ID,
 		&cfg.UserID,
@@ -428,13 +477,16 @@ func scanMirrorConfig(scanner mirrorConfigScanner) (*models.MirrorConfig, error)
 		&cfg.SyncTags,
 		&cfg.SyncDeletes,
 		&cfg.AllowForceUpdate,
+		&syncSchedule,
 		&cfg.Enabled,
 		&cfg.LastSyncedAt,
+		&cfg.LastScheduledAt,
 		&cfg.CreatedAt,
 		&cfg.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	cfg.SyncSchedule = syncSchedule.String
 	return cfg, nil
 }
 

@@ -139,6 +139,7 @@ func TestMirrorUIFlowE2E(t *testing.T) {
 		chromedp.SendKeys(`input[name="source_token"]`, "abcd1234", chromedp.ByQuery),
 		chromedp.SendKeys(`input[name="target_url"]`, "https://github.com/target-org/target-repo", chromedp.ByQuery),
 		chromedp.SendKeys(`input[name="target_token"]`, "wxyz6789", chromedp.ByQuery),
+		chromedp.SendKeys(`input[name="sync_schedule"]`, "*/10 * * * *", chromedp.ByQuery),
 		chromedp.Submit(`form[action="/mirrors"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`form[action="/mirrors/1/delete"]`, chromedp.ByQuery),
 		chromedp.Text("body", &bodyText, chromedp.ByQuery),
@@ -148,6 +149,8 @@ func TestMirrorUIFlowE2E(t *testing.T) {
 	requireContains(t, bodyText, "Demo Mirror")
 	requireContains(t, bodyText, "Mirror created and initial sync queued.")
 	requireContains(t, bodyText, "Need the full PAT and webhook walkthrough? Open the setup guide.")
+	requireContains(t, bodyText, "*/10 * * * *")
+	requireContains(t, bodyText, "UTC")
 	captureFullPage(t, ctx, filepath.Join(artifactDir, "mirror-detail.png"))
 
 	if err := chromedp.Run(ctx,

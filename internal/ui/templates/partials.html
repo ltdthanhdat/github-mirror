@@ -62,6 +62,7 @@
         <tr><th>Source</th><td>{{.SourceOwner}}/{{.SourceRepo}}</td></tr>
         <tr><th>Target</th><td>{{.TargetOwner}}/{{.TargetRepo}}</td></tr>
         <tr><th>Branch Pattern</th><td>{{.BranchPattern}}</td></tr>
+        <tr><th>Cron Schedule</th><td>{{if .SyncSchedule}}<code>{{.SyncSchedule}}</code> (UTC){{else}}Manual only{{end}}</td></tr>
         <tr><th>Sync Tags</th><td>{{if .SyncTags}}Yes{{else}}No{{end}}</td></tr>
         <tr><th>Sync Deletes</th><td>{{if .SyncDeletes}}Yes{{else}}No{{end}}</td></tr>
         <tr><th>Force Push</th><td>{{if .AllowForceUpdate}}Yes{{else}}No{{end}}</td></tr>

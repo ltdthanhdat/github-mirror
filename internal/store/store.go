@@ -9,6 +9,7 @@ type MirrorConfigStore interface {
 	CreateMirrorConfig(cfg *models.MirrorConfig) error
 	GetMirrorConfig(id uint64) (*models.MirrorConfig, error)
 	ListMirrorConfigsByUser(userID uint64) ([]*models.MirrorConfig, error)
+	ListScheduledMirrorConfigs() ([]*models.MirrorConfig, error)
 	UpdateMirrorConfig(cfg *models.MirrorConfig) error
 	DeleteMirrorConfig(id uint64) error
 }
@@ -18,6 +19,7 @@ type SyncJobStore interface {
 	CreateJob(job *models.SyncJob) error
 	GetJob(id uint64) (*models.SyncJob, error)
 	ListJobsByMirrorConfig(mirrorConfigID uint64) ([]*models.SyncJob, error)
+	HasActiveJobForMirror(mirrorConfigID uint64) (bool, error)
 	ClaimNextJob() (*models.SyncJob, error)
 	UpdateJob(job *models.SyncJob) error
 }
